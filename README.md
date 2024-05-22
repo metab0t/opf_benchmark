@@ -1,4 +1,8 @@
-Install PyOptInterface from the `nlp` branch
+Install PyOptInterface and casadi:
+```
+pip install -i https://test.pypi.org/simple/ pyoptinterface==0.3.0.dev0
+pip install casadi
+```
 
 Firstly, generate json format of case files
 ```
