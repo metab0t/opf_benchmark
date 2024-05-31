@@ -15,15 +15,15 @@ ipopt.load_library(libipopt_path)
 
 def get_ipopt_model():
     model = ipopt.Model()
-    model.set_option_int("print_level", 5)
-    model.set_option_str("hsllib", "libhsl.dll")
-    model.set_option_str("linear_solver", "ma27")
-    model.set_option_str("print_timing_statistics", "yes")
+    model.set_raw_parameter("print_level", 5)
+    model.set_raw_parameter("hsllib", "libhsl.dll")
+    model.set_raw_parameter("linear_solver", "ma27")
+    model.set_raw_parameter("print_timing_statistics", "yes")
 
     return model
 
 
-def solve_opf(model, data, jit_engine="C"):
+def solve_opf(model, data, jit_engine="LLVM"):
     Nbus = len(data["bus"])
     va = [model.add_variable() for _ in range(Nbus)]
 
@@ -105,7 +105,7 @@ def solve_opf(model, data, jit_engine="C"):
         d = []
         for i in range(1, 9):
             value = b[f"c{i}"]
-            d.append(model.add_parameter(value=value))
+            d.append(value)
         branch_parameters.append(d)
 
     for b, bp in zip(data["branch"], branch_parameters):
@@ -175,7 +175,7 @@ def poi_main(filename, jit_engine="LLVM"):
     # filename = "pglib_opf_case19402_goc"
     model = get_ipopt_model()
     logpath = str(Path(__file__).parent / "log" / f"{filename}_poi_{jit_engine}.log")
-    model.set_option_str("output_file", logpath)
+    model.set_raw_parameter("output_file", logpath)
 
     json_path = Path(__file__).parent / "json" / f"{filename}.json"
     json_path = json_path.resolve()
@@ -190,4 +190,4 @@ def poi_main(filename, jit_engine="LLVM"):
 
 
 if __name__ == "__main__":
-    poi_main("pglib_opf_case6495_rte", "LLVM")
+    poi_main("pglib_opf_case6515_rte", "LLVM")

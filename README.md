@@ -1,6 +1,6 @@
-Install PyOptInterface and casadi:
+Install PyOptInterface:
 ```
-pip install -i https://test.pypi.org/simple/ pyoptinterface==0.3.0.dev0
+pip install pyoptinterface
 pip install casadi
 ```
 
