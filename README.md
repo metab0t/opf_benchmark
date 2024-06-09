@@ -1,6 +1,6 @@
 Install PyOptInterface:
 ```
-pip install pyoptinterface
+pip install pyoptinterface[nlp]
 pip install casadi
 ```
 
