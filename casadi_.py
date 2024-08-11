@@ -6,6 +6,7 @@ import casadi
 from pathlib import Path
 import json
 import time
+import math
 
 
 def solve_opf(data, options):
@@ -175,7 +176,178 @@ def solve_opf(data, options):
     return solution
 
 
-def casadi_main(filename, jit = False):
+def solve_opf_rectangular(data, options):
+    x, x0, lbx, ubx, cons, lbg, ubg = [], [], [], [], [], [], []
+
+    vr, vi = {}, {}
+    Nbus = len(data["bus"])
+    vmin = data["vmin"]
+    vmax = data["vmax"]
+    for k in range(Nbus):
+        vr[k] = casadi.SX.sym(f"vr{k}")
+        x.append(vr[k])
+        x0.append(1.0)
+        lbx.append(-vmax[k])
+        ubx.append(vmax[k])
+        vi[k] = casadi.SX.sym(f"vi{k}")
+        x.append(vi[k])
+        x0.append(0.0)
+        lbx.append(-vmax[k])
+        ubx.append(vmax[k])
+
+        cons.append(vr[k] ** 2 + vi[k] ** 2)
+        lbg.append(vmin[k] ** 2)
+        ubg.append(vmax[k] ** 2)
+
+    pg, qg = {}, {}
+    Ngen = len(data["gen"])
+    pmin = data["pmin"]
+    pmax = data["pmax"]
+    qmin = data["qmin"]
+    qmax = data["qmax"]
+    for k in range(Ngen):
+        pg[k] = casadi.SX.sym(f"pg{k}")
+        x.append(pg[k])
+        x0.append(0.0)
+        lbx.append(pmin[k])
+        ubx.append(pmax[k])
+        qg[k] = casadi.SX.sym(f"qg{k}")
+        x.append(qg[k])
+        x0.append(0.0)
+        lbx.append(qmin[k])
+        ubx.append(qmax[k])
+
+    p, q = {}, {}
+    Narc = len(data["arc"])
+    rate_a = data["rate_a"]
+    for k in range(Narc):
+        a = rate_a[k]
+        p[k] = casadi.SX.sym(f"p{k}")
+        x.append(p[k])
+        x0.append(0.0)
+        lbx.append(-a)
+        ubx.append(a)
+        q[k] = casadi.SX.sym(f"q{k}")
+        x.append(q[k])
+        x0.append(0.0)
+        lbx.append(-a)
+        ubx.append(a)
+
+    f = sum(
+        g["cost1"] * pg[g["i"] - 1] * pg[g["i"] - 1]
+        + g["cost2"] * pg[g["i"] - 1]
+        + g["cost3"]
+        for g in data["gen"]
+    )
+
+    for k in data["ref_buses"]:
+        cons.append(vi[k - 1])
+        lbg.append(0)
+        ubg.append(0)
+
+    p_balance_expr = [0.0 for _ in range(Nbus)]
+    q_balance_expr = [0.0 for _ in range(Nbus)]
+    for i, b in enumerate(data["bus"]):
+        p_balance_expr[i] += b["pd"] + b["gs"] * (vr[i] ** 2 + vi[i] ** 2)
+        q_balance_expr[i] += b["qd"] - b["bs"] * (vr[i] ** 2 + vi[i] ** 2)
+    for a in data["arc"]:
+        bus = a["bus"] - 1
+        i = a["i"] - 1
+        p_balance_expr[bus] += p[i]
+        q_balance_expr[bus] += q[i]
+    for g in data["gen"]:
+        bus = g["bus"] - 1
+        i = g["i"] - 1
+        p_balance_expr[bus] -= pg[i]
+        q_balance_expr[bus] -= qg[i]
+
+    for i in range(Nbus):
+        cons.append(p_balance_expr[i])
+        lbg.append(0)
+        ubg.append(0)
+        cons.append(q_balance_expr[i])
+        lbg.append(0)
+        ubg.append(0)
+
+    angmin = data["angmin"]
+    angmax = data["angmax"]
+    for i, br in enumerate(data["branch"]):
+        f_idx = br["f_idx"] - 1
+        t_idx = br["t_idx"] - 1
+        f_bus = br["f_bus"] - 1
+        t_bus = br["t_bus"] - 1
+        p_fr = p[f_idx]
+        q_fr = q[f_idx]
+        p_to = p[t_idx]
+        q_to = q[t_idx]
+        vi_fr = vi[f_bus]
+        vi_to = vi[t_bus]
+        vr_fr = vr[f_bus]
+        vr_to = vr[t_bus]
+        g, b = br["g"], br["b"]
+        tr, ti = br["tr"], br["ti"]
+        ttm = tr**2 + ti**2
+        g_fr = br["g_fr"]
+        b_fr = br["b_fr"]
+        g_to = br["g_to"]
+        b_to = br["b_to"]
+        cons.append(
+            (g + g_fr) / ttm * (vr_fr**2 + vi_fr**2)
+            + (-g * tr + b * ti) / ttm * (vr_fr * vr_to + vi_fr * vi_to)
+            + (-b * tr - g * ti) / ttm * (vi_fr * vr_to - vr_fr * vi_to)
+            - p_fr
+        )
+        cons.append(
+            -(b + b_fr) / ttm * (vr_fr**2 + vi_fr**2)
+            - (-b * tr - g * ti) / ttm * (vr_fr * vr_to + vi_fr * vi_to)
+            + (-g * tr + b * ti) / ttm * (vi_fr * vr_to - vr_fr * vi_to)
+            - q_fr
+        )
+        cons.append(
+            (g + g_to) * (vr_to**2 + vi_to**2)
+            + (-g * tr - b * ti) / ttm * (vr_fr * vr_to + vi_fr * vi_to)
+            + (-b * tr + g * ti) / ttm * (-(vi_fr * vr_to - vr_fr * vi_to))
+            - p_to
+        )
+        cons.append(
+            -(b + b_to) * (vr_to**2 + vi_to**2)
+            - (-b * tr + g * ti) / ttm * (vr_fr * vr_to + vi_fr * vi_to)
+            + (-g * tr - b * ti) / ttm * (-(vi_fr * vr_to - vr_fr * vi_to))
+            - q_to
+        )
+        for i in range(4):
+            lbg.append(0)
+            ubg.append(0)
+
+        cons.append((vi_fr * vr_to - vr_fr * vi_to) / (vr_fr * vr_to + vi_fr * vi_to))
+        lbg.append(math.tan(angmin[i]))
+        ubg.append(math.tan(angmax[i]))
+
+        rate_a_sq = br["rate_a_sq"]
+        cons.append(p_fr**2 + q_fr**2)
+        lbg.append(-casadi.inf)
+        ubg.append(rate_a_sq)
+        cons.append(p_to**2 + q_to**2)
+        lbg.append(-casadi.inf)
+        ubg.append(rate_a_sq)
+
+    model = casadi.nlpsol(
+        "model",
+        "ipopt",
+        {"x": casadi.vcat(x), "f": f, "g": casadi.vcat(cons)},
+        options,
+    )
+    solution = model(
+        lbx=lbx,
+        ubx=ubx,
+        lbg=lbg,
+        ubg=ubg,
+        x0=x0,
+    )
+    return solution
+
+
+def casadi_main(logdir, filename, method, jit=False):
     # filename = "pglib_opf_case30000_goc"
     # filename = "pglib_opf_case78484_epigrids"
     # filename = "pglib_opf_case10480_goc"
@@ -186,13 +358,14 @@ def casadi_main(filename, jit = False):
     with open(json_path, "r") as f:
         data = json.load(f)
 
-    logpath =  str(Path(__file__).parent / "log" / f"{filename}_casadi.log")
+    logpath = str(logdir / f"{filename}_casadi.log")
     options = {
         "ipopt.print_level": 5,
         "ipopt.hsllib": "libhsl.dll",
         "ipopt.linear_solver": "ma27",
         "ipopt.print_timing_statistics": "yes",
         "ipopt.output_file": logpath,
+        "ipopt.max_iter": 200,
     }
 
     if jit:
@@ -202,9 +375,12 @@ def casadi_main(filename, jit = False):
         options.update({"jit": True, "compiler": "shell", "jit_options": jit_options})
 
     t0 = time.time()
-    solve_opf(data, options)
+    if method == "polar":
+        solve_opf(data, options)
+    else:
+        solve_opf_rectangular(data, options)
     t1 = time.time()
-    
+
     return t1 - t0, logpath
 
 
