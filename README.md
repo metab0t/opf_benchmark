@@ -5,6 +5,8 @@ pip install pyoptinterface[nlp]
 pip install casadi
 ```
 
+Download executable of Gravity from [the link](https://github.com/metab0t/Gravity/releases), extract `acopf.exe` to this directory.
+
 Firstly, generate json format of case files
 
 ```
