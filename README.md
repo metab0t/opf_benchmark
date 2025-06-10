@@ -12,7 +12,7 @@ Firstly, generate json format of case files
 ```
 mkdir json
 mkdir log
-julia export_case.jl
+julia --project=. export_case.jl
 ```
 
 Run Python benchmark
